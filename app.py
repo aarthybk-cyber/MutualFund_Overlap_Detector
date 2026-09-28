@@ -14,7 +14,7 @@ from demo_data import make_demo_df
 
 st.set_page_config(page_title="Mutual Fund Overlap Detector", page_icon="📊", layout="wide")
 
-BUNDLED_CSV = Path(__file__).parent / "data" / "fund_overlap_dataset.csv"
+BUNDLED_CSV = Path(__file__).parent / "fund_overlap_dataset.csv"
 
 
 # ---------- data loading ----------
