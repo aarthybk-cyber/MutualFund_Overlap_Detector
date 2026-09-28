@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+.streamlit/secrets.toml
+
+# Holdings data: keep it out of a public repo unless you are sure you may share it.
+# Delete the next line if you WANT to commit data/fund_overlap_dataset.csv.
+data/
