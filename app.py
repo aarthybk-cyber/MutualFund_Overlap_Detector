@@ -12,7 +12,7 @@ import streamlit as st
 import overlap_core as oc
 from demo_data import make_demo_df
 
-st.set_page_config(page_title="Mutual Fund Overlap Detector", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Fund Overlap Detector", page_icon="📊", layout="wide")
 
 ROOT = Path(__file__).parent
 # Works whether the CSV (plain or gzipped) sits next to app.py or inside a data/ folder.
@@ -38,7 +38,10 @@ def pairs_all_months(df: pd.DataFrame) -> pd.DataFrame:
     return oc.all_pairs_all_months(df)
 
 
-st.title("📊 Mutual Fund Overlap Detector")
+st.title("📊 Fund Overlap Detector")
+st.markdown(
+    "##### Uncover the stocks hiding across your mutual funds — before a single bad quarter hits your whole portfolio."
+)
 st.caption(
     "Cash is excluded, securities are matched on ISIN, and each shared stock "
     "contributes the smaller of the two weights."
@@ -104,7 +107,7 @@ funds = sorted(equity["fund_name"].unique())
 categories = oc.fund_categories(df)
 
 tab_product, tab_overlap, tab_pairs, tab_checks = st.tabs(
-    ["📱 App (Phase 3)", "🔍 Pairwise overlap", "🧮 All pairs & sanity check", "✅ Data checks"])
+    ["📱 My Portfolio", "🔍 Pairwise overlap", "🧮 All pairs & sanity check", "✅ Data checks"])
 
 # ---------- pairwise overlap ----------
 with tab_overlap:
@@ -147,7 +150,8 @@ with tab_overlap:
                 st.dataframe(table, width="stretch", hide_index=True)
                 st.download_button("Download shared holdings (CSV)",
                                    table.to_csv(index=False).encode("utf-8"),
-                                   file_name="overlap_%s.csv" % date, mime="text/csv")
+                                   file_name="overlap_%s.csv" % date, mime="text/csv",
+                                   type="primary")
 
 # ---------- Phase 3 product: fund/allocation picker, heatmap, top-20, flags, time series ----------
 with tab_product:
@@ -221,7 +225,8 @@ with tab_product:
             st.caption("Reconciliation: exposures (stocks + cash) add up to ₹{:,.2f} vs corpus ₹{:,.2f} → {}".format(
                 recon, corpus, "✅ match" if abs(recon - corpus) < 1 else "❌ mismatch"))
             st.download_button("Download merged portfolio (CSV)", port.to_csv(index=False).encode("utf-8"),
-                               file_name="merged_portfolio_%s.csv" % date, mime="text/csv")
+                               file_name="merged_portfolio_%s.csv" % date, mime="text/csv",
+                               type="primary")
 
             # ----- Overlap over time (36 months) for the selected funds -----
             st.subheader("Overlap over time")
@@ -266,7 +271,8 @@ with tab_pairs:
     top_first = pairs.sort_values("overlap", ascending=False)
     st.dataframe(top_first.round(2), width="stretch", hide_index=True)
     st.download_button("Download pairs for this month (CSV)", top_first.to_csv(index=False).encode("utf-8"),
-                       file_name="all_pairs_%s.csv" % date, mime="text/csv")
+                       file_name="all_pairs_%s.csv" % date, mime="text/csv",
+                       type="primary")
 
     st.subheader("Full run: every month")
     if st.button("Compute all months"):
@@ -275,7 +281,8 @@ with tab_pairs:
         st.write("Overlap range: %.2f to %.2f · missing values: %d" % (
             allm["overlap"].min(), allm["overlap"].max(), int(allm["overlap"].isna().sum())))
         st.download_button("Download all months (CSV)", allm.to_csv(index=False).encode("utf-8"),
-                           file_name="all_pairs_all_months.csv", mime="text/csv")
+                           file_name="all_pairs_all_months.csv", mime="text/csv",
+                           type="primary")
 
 # ---------- data checks ----------
 with tab_checks:
