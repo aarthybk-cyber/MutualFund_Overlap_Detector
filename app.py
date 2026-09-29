@@ -15,14 +15,17 @@ from demo_data import make_demo_df
 st.set_page_config(page_title="Mutual Fund Overlap Detector", page_icon="📊", layout="wide")
 
 ROOT = Path(__file__).parent
-# Works whether the CSV sits next to app.py or inside a data/ folder.
-BUNDLED_CANDIDATES = [ROOT / "fund_overlap_dataset.csv", ROOT / "data" / "fund_overlap_dataset.csv"]
+# Works whether the CSV (plain or gzipped) sits next to app.py or inside a data/ folder.
+_NAMES = ["fund_overlap_dataset.csv", "fund_overlap_dataset.csv.gz",
+          "fund_overlap_holdings_dataset.csv", "fund_overlap_holdings_dataset.csv.gz"]
+BUNDLED_CANDIDATES = [ROOT / n for n in _NAMES] + [ROOT / "data" / n for n in _NAMES]
 
 
 # ---------- data loading ----------
 @st.cache_data(show_spinner="Reading data...")
-def load_from_bytes(raw: bytes) -> pd.DataFrame:
-    return oc.prepare(pd.read_csv(io.BytesIO(raw)))
+def load_from_bytes(raw: bytes, gzipped: bool = False) -> pd.DataFrame:
+    comp = "gzip" if gzipped else None
+    return oc.prepare(pd.read_csv(io.BytesIO(raw), compression=comp))
 
 
 @st.cache_data
@@ -40,6 +43,12 @@ st.caption(
     "Cash is excluded, securities are matched on ISIN, and each shared stock "
     "contributes the smaller of the two weights."
 )
+st.info(
+    "📘 **Educational tool, not investment advice.** No output here is a "
+    "buy/sell/hold recommendation. **All data is synthetic** — fictional funds and "
+    "companies generated from realistic mandate rules, not real fund holdings.",
+    icon="ℹ️",
+)
 
 with st.sidebar:
     st.header("Data")
@@ -51,14 +60,14 @@ with st.sidebar:
 bundled = next((p for p in BUNDLED_CANDIDATES if p.exists()), None)
 try:
     if uploaded is not None:
-        df = load_from_bytes(uploaded.getvalue())
+        df = load_from_bytes(uploaded.getvalue(), gzipped=uploaded.name.endswith(".gz"))
         source = "uploaded file"
     elif use_demo:
         df = load_demo()
         source = "synthetic demo data (fictional securities)"
     elif bundled is not None:
-        df = load_from_bytes(bundled.read_bytes())
-        source = "bundled dataset"
+        df = load_from_bytes(bundled.read_bytes(), gzipped=bundled.suffix == ".gz")
+        source = "bundled dataset (%s)" % bundled.name
     else:
         st.info("Upload a holdings CSV in the sidebar, or tick **Use synthetic demo data** to try the app.")
         st.stop()
@@ -75,8 +84,8 @@ equity = oc.equity_only(snap_all)                        # equity only
 funds = sorted(equity["fund_name"].unique())
 categories = oc.fund_categories(df)
 
-tab_overlap, tab_port, tab_pairs, tab_checks = st.tabs(
-    ["Pairwise overlap", "Merged portfolio", "All pairs & sanity check", "Data checks"])
+tab_product, tab_overlap, tab_pairs, tab_checks = st.tabs(
+    ["📱 App (Phase 3)", "Pairwise overlap", "All pairs & sanity check", "Data checks"])
 
 # ---------- pairwise overlap ----------
 with tab_overlap:
@@ -121,46 +130,95 @@ with tab_overlap:
                                    table.to_csv(index=False).encode("utf-8"),
                                    file_name="overlap_%s.csv" % date, mime="text/csv")
 
-# ---------- merged portfolio ----------
-with tab_port:
-    st.write("Enter how much you have invested in each fund. Each stock's rupee exposure is "
-             "(amount in fund × stock's weight in that fund), added up across funds.")
-    picked = st.multiselect("Funds held", funds, default=funds[:2])
+# ---------- Phase 3 product: fund/allocation picker, heatmap, top-20, flags, time series ----------
+with tab_product:
+    st.write("Search and select the funds in your portfolio, enter how much you've put into "
+             "each, and pick a month. Everything below updates for that selection.")
+    picked = st.multiselect("Funds held (type to search)", funds, default=funds[:3], key="p3_funds")
+
     if len(picked) < 1:
-        st.info("Select at least one fund.")
+        st.info("Select at least one fund to see your merged position.")
     else:
         cols = st.columns(min(len(picked), 4))
         alloc = {}
         for i, f in enumerate(picked):
             alloc[f] = cols[i % len(cols)].number_input(
-                f, min_value=0, value=50000, step=5000, key="alloc_" + f)
+                f, min_value=0, value=50000, step=5000, key="p3_alloc_" + f)
         corpus = sum(alloc.values())
-        flag_pct = st.slider("Concentration flag: flag a stock above this % of the total corpus", 1.0, 20.0, 5.0, 0.5)
 
         if corpus <= 0:
             st.warning("Total invested amount must be above zero.")
         else:
-            port = oc.merged_portfolio(snap_all, alloc, flag_pct)
-            flagged = port[port["flag"]]
+            port = oc.merged_portfolio(snap_all, alloc, flag_pct=5.0)
             stocks = port[port["isin"] != oc.CASH_ISIN]
+            flagged = stocks[stocks["flag"]]
 
-            p1, p2, p3 = st.columns(3)
-            p1.metric("Total corpus", "₹{:,.0f}".format(corpus))
-            p2.metric("Distinct stocks", len(stocks))
-            p3.metric("Stocks above %.1f%%" % flag_pct, len(flagged))
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total corpus", "₹{:,.0f}".format(corpus))
+            m2.metric("Distinct stocks", len(stocks))
+            m3.metric("Stocks above 5% of corpus", len(flagged))
 
-            show = port.copy()
-            show["flag"] = [("🚩 held by %d of %d funds" % (n, len(picked))) if f else ""
-                            for f, n in zip(port["flag"], port["funds_holding"])]
-            show["exposure"] = show["exposure"].round(2)
-            show["pct_of_corpus"] = show["pct_of_corpus"].round(2)
-            st.dataframe(show, width="stretch", hide_index=True)
+            # ----- Heatmap: pairwise overlap among selected funds -----
+            st.subheader("Pairwise overlap heatmap")
+            if len(picked) < 2:
+                st.caption("Select at least two funds to compare their overlap.")
+            else:
+                hm = oc.overlap_matrix(equity, picked)
+                short_names = [n.replace(" Fund", "") for n in hm.index]
+                hm_display = hm.copy()
+                hm_display.index = short_names
+                hm_display.columns = short_names
+                styled = (hm_display.style
+                          .map(oc.heat_color)
+                          .format("{:.1f}", na_rep="—"))
+                st.dataframe(styled, width="stretch")
+                st.caption("Diagonal is blank (a fund vs. itself isn't a finding). Darker = more overlap.")
+
+            # ----- Top-20 merged holdings -----
+            st.subheader("Top 20 merged stock exposures")
+            top20 = stocks.sort_values("exposure", ascending=False).head(20)
+            label = top20["company"] if "company" in top20.columns else top20["isin"]
+            st.bar_chart(pd.Series(top20["pct_of_corpus"].values, index=label.values, name="% of corpus"))
+            show20 = top20.copy()
+            show20["flag"] = [("🚩 held by %d of %d funds" % (n, len(picked))) if f else ""
+                              for f, n in zip(top20["flag"], top20["funds_holding"])]
+            show20["exposure"] = show20["exposure"].round(2)
+            show20["pct_of_corpus"] = show20["pct_of_corpus"].round(2)
+            st.dataframe(show20, width="stretch", hide_index=True)
+
+            # ----- Concentration flag table -----
+            st.subheader("Concentration flags (> 5% of total corpus)")
+            if flagged.empty:
+                st.caption("No stock crosses 5% of the total corpus for this allocation.")
+            else:
+                cols_f = ["isin", "company", "exposure", "pct_of_corpus", "funds_holding"] \
+                    if "company" in flagged.columns else ["isin", "exposure", "pct_of_corpus", "funds_holding"]
+                ft = flagged[cols_f].copy()
+                ft["exposure"] = ft["exposure"].round(2)
+                ft["pct_of_corpus"] = ft["pct_of_corpus"].round(2)
+                st.dataframe(ft, width="stretch", hide_index=True)
 
             recon = port["exposure"].sum()
-            st.caption("Reconciliation: exposures (stocks + cash) add up to ₹{:,.2f} "
-                       "vs corpus ₹{:,.2f} → {}".format(recon, corpus, "✅ match" if abs(recon - corpus) < 1 else "❌ mismatch"))
+            st.caption("Reconciliation: exposures (stocks + cash) add up to ₹{:,.2f} vs corpus ₹{:,.2f} → {}".format(
+                recon, corpus, "✅ match" if abs(recon - corpus) < 1 else "❌ mismatch"))
             st.download_button("Download merged portfolio (CSV)", port.to_csv(index=False).encode("utf-8"),
                                file_name="merged_portfolio_%s.csv" % date, mime="text/csv")
+
+            # ----- Overlap over time (36 months) for the selected funds -----
+            st.subheader("Overlap over time")
+            if len(picked) < 2:
+                st.caption("Select at least two funds to see how their overlap has moved over time.")
+            else:
+                allm = pairs_all_months(df)
+                ts = oc.pair_time_series(allm, picked)
+                if ts.empty:
+                    st.caption("No overlapping months found for this fund selection.")
+                else:
+                    st.line_chart(ts)
+                    st.caption("Overlap %% between each selected pair, across all %d months on file."
+                               % df["date"].nunique())
+
+
 
 # ---------- all pairs & sanity ----------
 with tab_pairs:
@@ -215,7 +273,7 @@ with tab_checks:
         ("pct_nav totals within 100 ± 0.01 per fund-month",
          r["outside_tolerance"] == 0, "%d outside (range %.4f to %.4f)" % (
              r["outside_tolerance"], r["total_min"], r["total_max"])),
-        ("One cash row per fund-month", r["cash_rows"] == r["fund_months"],
+        ("Cash rows consistent (either none, or exactly one per fund-month)", r["cash_consistent"],
          "%d cash rows vs %d fund-months" % (r["cash_rows"], r["fund_months"])),
         ("No nulls in required columns", r["nulls"] == 0, "%d nulls" % r["nulls"]),
         ("No duplicate fund+date+isin rows", r["duplicates"] == 0, "%d duplicates" % r["duplicates"]),

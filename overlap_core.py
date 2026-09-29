@@ -83,6 +83,11 @@ def integrity_report(df: pd.DataFrame, tol: float = 0.01) -> dict:
     totals = df.groupby(["fund_name", "date"])["pct_nav"].sum()
     outside = totals[(totals < 100 - tol) | (totals > 100 + tol)]
 
+    # Some builds of the dataset carry one CASH_EQV row per fund-month; others
+    # (fully-invested, no separate cash line) carry none at all. Either is a
+    # consistent representation - what's WRONG is something in between.
+    cash_consistent = len(cash) == 0 or len(cash) == len(totals)
+
     return {
         "rows": len(df),
         "funds": df["fund_name"].nunique(),
@@ -91,6 +96,7 @@ def integrity_report(df: pd.DataFrame, tol: float = 0.01) -> dict:
         "last_date": df["date"].max().date(),
         "equity_isins": equity["isin"].nunique(),
         "cash_rows": len(cash),
+        "cash_consistent": bool(cash_consistent),
         "fund_months": len(totals),
         "total_min": float(totals.min()),
         "total_max": float(totals.max()),
@@ -227,3 +233,51 @@ def merged_portfolio(equity_and_cash: pd.DataFrame, allocations: dict, flag_pct:
     out["flag"] = (out["pct_of_corpus"] > flag_pct) & (out.index != CASH_ISIN)
     out = out.sort_values("exposure", ascending=False)
     return out.reset_index()
+
+
+# ======================================================================
+# Phase 3 additions: heatmap matrix + overlap-over-time for a fund set
+# ======================================================================
+
+def overlap_matrix(equity: pd.DataFrame, funds: list) -> pd.DataFrame:
+    """Symmetric fund x fund overlap matrix for the given funds (diagonal = NaN,
+    since a fund's overlap with itself is not a meaningful finding)."""
+    funds = [f for f in dict.fromkeys(funds)]  # de-dupe, keep order
+    M = weight_matrix(equity)
+    missing = [f for f in funds if f not in M.index]
+    if missing:
+        raise ValueError("Fund(s) not found at this date: %s" % ", ".join(missing))
+    X = M.loc[funds].to_numpy()
+    n = len(funds)
+    mat = np.empty((n, n))
+    for i in range(n):
+        row = np.minimum(X[i], X).sum(axis=1)
+        mat[i] = row
+    np.fill_diagonal(mat, np.nan)
+    return pd.DataFrame(mat, index=funds, columns=funds)
+
+
+def heat_color(val, vmin=0.0, vmax=100.0) -> str:
+    """CSS background-color for one heatmap cell: pale yellow (low) -> deep red (high)."""
+    if pd.isna(val):
+        return "background-color:#f2f2f2; color:#999"
+    t = max(0.0, min(1.0, (val - vmin) / (vmax - vmin + 1e-9)))
+    r = round(255 + (178 - 255) * t)
+    g = round(255 + (24 - 255) * t)
+    b = round(224 + (43 - 224) * t)
+    text = "#fff" if t > 0.55 else "#1c2430"
+    return "background-color: rgb(%d,%d,%d); color:%s" % (r, g, b, text)
+
+
+def pair_time_series(all_months_pairs: pd.DataFrame, funds: list) -> pd.DataFrame:
+    """Wide table: date x pair, overlap %, restricted to pairs within `funds`."""
+    fs = set(funds)
+    sub = all_months_pairs[
+        all_months_pairs["fund_a"].isin(fs) & all_months_pairs["fund_b"].isin(fs)
+    ].copy()
+    if sub.empty:
+        return sub
+    short = lambda n: n.replace(" Fund", "")
+    sub["pair"] = sub["fund_a"].map(short) + " / " + sub["fund_b"].map(short)
+    wide = sub.pivot(index="date", columns="pair", values="overlap").sort_index()
+    return wide
