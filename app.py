@@ -14,6 +14,63 @@ from demo_data import make_demo_df
 
 st.set_page_config(page_title="Fund Overlap Detector", page_icon="📊", layout="wide")
 
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --ink: #1B2430;
+  --ink-soft: #5B6472;
+  --paper: #EEF2EF;
+  --paper-raised: #FFFFFF;
+  --line: #D3DBD6;
+  --accent: #0F9D58;
+}
+
+html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
+
+[data-testid="stAppViewContainer"] { background-color: var(--paper); }
+
+h1 {
+  font-family: 'Source Serif 4', Georgia, serif !important;
+  font-weight: 700 !important;
+  color: var(--ink) !important;
+  letter-spacing: -0.01em;
+  display: inline-block;
+  padding-bottom: 0.3rem;
+  border-bottom: 3px solid var(--accent);
+  margin-bottom: 0.9rem !important;
+}
+
+[data-testid="stSidebar"] {
+  background-color: var(--paper-raised);
+  border-right: 1px solid var(--line);
+}
+[data-testid="stSidebar"] h3 { color: var(--ink) !important; font-weight: 600 !important; }
+
+.stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid var(--line); gap: 8px; }
+.stTabs [data-baseweb="tab"] p { font-weight: 500; }
+.stTabs [aria-selected="true"] p { color: var(--ink) !important; font-weight: 700 !important; }
+
+[data-testid="stMetricValue"] { color: var(--ink); }
+[data-testid="stMetricLabel"] { color: var(--ink-soft); font-weight: 500; }
+
+.stButton button {
+  border-radius: 6px;
+  border-color: var(--line);
+  font-weight: 500;
+}
+.stButton button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+[data-testid="stDataFrame"] { border: 1px solid var(--line); border-radius: 8px; }
+
+hr { border-color: var(--line) !important; }
+</style>
+""", unsafe_allow_html=True)
+
 ROOT = Path(__file__).parent
 # Works whether the CSV (plain or gzipped) sits next to app.py or inside a data/ folder.
 _NAMES = ["fund_overlap_dataset.csv", "fund_overlap_dataset.csv.gz",
