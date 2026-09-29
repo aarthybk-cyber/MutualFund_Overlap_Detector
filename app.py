@@ -50,42 +50,61 @@ st.info(
     icon="ℹ️",
 )
 
-with st.sidebar:
-    st.header("Data")
-    uploaded = st.file_uploader("Upload holdings CSV", type="csv")
-    use_demo = st.checkbox("Use synthetic demo data", value=False)
-    st.caption("Required columns: fund_name, date, isin, pct_nav. "
-               "Optional: amc, category, company, market_value.")
-
 bundled = next((p for p in BUNDLED_CANDIDATES if p.exists()), None)
+
+# ---------- sidebar: data source ----------
+with st.sidebar:
+    st.markdown("### 🗂️ Data source")
+    src_options = (["📦 Bundled dataset"] if bundled is not None else []) + \
+        ["⬆️ Upload my own CSV", "🧪 Synthetic demo data"]
+    data_source = st.radio("Data source", src_options, label_visibility="collapsed")
+
+    uploaded = None
+    if data_source == "⬆️ Upload my own CSV":
+        uploaded = st.file_uploader("Holdings CSV", type=["csv"], label_visibility="collapsed")
+
+    with st.expander("ℹ️ CSV format"):
+        st.caption(
+            "**Required:** `fund_name`, `date`, `isin`, `pct_nav`  \n"
+            "**Optional:** `amc`, `category`, `company`, `market_value`"
+        )
+
 try:
-    if uploaded is not None:
+    if data_source == "⬆️ Upload my own CSV":
+        if uploaded is None:
+            st.info("👈 Upload a holdings CSV in the sidebar to get started.")
+            st.stop()
         df = load_from_bytes(uploaded.getvalue(), gzipped=uploaded.name.endswith(".gz"))
         source = "uploaded file"
-    elif use_demo:
+    elif data_source == "🧪 Synthetic demo data":
         df = load_demo()
         source = "synthetic demo data (fictional securities)"
-    elif bundled is not None:
+    else:
         df = load_from_bytes(bundled.read_bytes(), gzipped=bundled.suffix == ".gz")
         source = "bundled dataset (%s)" % bundled.name
-    else:
-        st.info("Upload a holdings CSV in the sidebar, or tick **Use synthetic demo data** to try the app.")
-        st.stop()
 except ValueError as e:
     st.error(str(e))
     st.stop()
 
-st.sidebar.success("Loaded: %s" % source)
+n_isins = df.loc[df["isin"] != oc.CASH_ISIN, "isin"].nunique()
+with st.sidebar:
+    st.success("Loaded: %s" % source)
+    st.caption(
+        "**{:,}** rows · **{}** funds · **{}** months · **{}** ISINs".format(
+            len(df), df["fund_name"].nunique(), df["date"].nunique(), n_isins)
+    )
+    st.divider()
+    st.markdown("### 📅 Filters")
+    dates = sorted(df["date"].dt.date.unique())
+    date = st.selectbox("Month-end", dates, index=len(dates) - 1)
 
-dates = sorted(df["date"].dt.date.unique())
-date = st.sidebar.selectbox("Month-end", dates, index=len(dates) - 1)
 snap_all = df[df["date"] == pd.Timestamp(date)]          # equity + cash
 equity = oc.equity_only(snap_all)                        # equity only
 funds = sorted(equity["fund_name"].unique())
 categories = oc.fund_categories(df)
 
 tab_product, tab_overlap, tab_pairs, tab_checks = st.tabs(
-    ["📱 App (Phase 3)", "Pairwise overlap", "All pairs & sanity check", "Data checks"])
+    ["📱 App (Phase 3)", "🔍 Pairwise overlap", "🧮 All pairs & sanity check", "✅ Data checks"])
 
 # ---------- pairwise overlap ----------
 with tab_overlap:
